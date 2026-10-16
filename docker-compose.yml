@@ -1,0 +1,76 @@
+services:
+  # ─── n8n Orchestration ───
+  n8n:
+    image: n8nio/n8n:latest
+    container_name: vr-therapy-n8n
+    restart: unless-stopped
+    ports:
+      - "${N8N_PORT:-5678}:5678"
+    environment:
+      - N8N_BASIC_AUTH_ACTIVE=true
+      - N8N_BASIC_AUTH_USER=${N8N_BASIC_AUTH_USER:-admin}
+      - N8N_BASIC_AUTH_PASSWORD=${N8N_BASIC_AUTH_PASSWORD:-change-me}
+      - WEBHOOK_URL=${N8N_WEBHOOK_URL:-http://localhost:5678/webhook}
+      - GENERIC_TIMEZONE=Europe/Istanbul
+    volumes:
+      - n8n_data:/home/node/.n8n
+      - ./data:/data
+    networks:
+      - vr-therapy
+
+  # ─── Media Service (FFmpeg + Job API) ───
+  media-service:
+    build:
+      context: ./media-service
+      dockerfile: Dockerfile
+    container_name: vr-therapy-media
+    restart: unless-stopped
+    ports:
+      - "${MEDIA_SERVICE_PORT:-3001}:3001"
+    environment:
+      - PORT=3001
+      - OUTPUT_DIR=/data/videos
+      - TEMP_DIR=/data/temp
+      - PANORAMA_DIR=/data/panoramas
+      - COMFYUI_API_URL=${COMFYUI_API_URL:-http://host.docker.internal:8188}
+      - SDXL_CHECKPOINT=${SDXL_CHECKPOINT:-juggernautXL_v9Rundiffusion.safetensors}
+      - CONTROLNET_DEPTH_MODEL=${CONTROLNET_DEPTH_MODEL:-diffusers_xl_depth_full.safetensors}
+      - DEPTH_PREPROCESSOR_MODEL=${DEPTH_PREPROCESSOR_MODEL:-depth_anything_vitl14.pth}
+      - SVD_MODEL=${SVD_MODEL:-svd_xt_1_1.safetensors}
+      - OPENAI_API_KEY=${OPENAI_API_KEY}
+      - OPENAI_MODEL=${OPENAI_MODEL:-gpt-4o-mini}
+      - SMTP_HOST=${SMTP_HOST:-}
+      - SMTP_PORT=${SMTP_PORT:-587}
+      - SMTP_USER=${SMTP_USER:-}
+      - SMTP_PASS=${SMTP_PASS:-}
+      - SMTP_FROM=${SMTP_FROM:-noreply@vrtherapy.local}
+      - PUBLIC_URL=${PUBLIC_URL:-http://localhost:3001}
+    volumes:
+      - ./data:/data
+    depends_on:
+      - n8n
+    networks:
+      - vr-therapy
+
+  # ─── Frontend (Next.js) ───
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+    container_name: vr-therapy-frontend
+    restart: unless-stopped
+    ports:
+      - "${FRONTEND_PORT:-3000}:3000"
+    environment:
+      - NEXT_PUBLIC_API_URL=http://localhost:${MEDIA_SERVICE_PORT:-3001}
+    depends_on:
+      - media-service
+    networks:
+      - vr-therapy
+
+volumes:
+  n8n_data:
+
+networks:
+  vr-therapy:
+    driver: bridge

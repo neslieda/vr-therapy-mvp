@@ -1,0 +1,194 @@
+{
+  "_comment": "SDXL + ControlNet Depth + SVD — Acrophobia VR Pipeline",
+  "_description": "Two-pass generation: 1) SDXL base image with realism checkpoint, 2) Depth extraction + ControlNet refinement, 3) SVD video generation",
+  "_requirements": [
+    "SDXL checkpoint: juggernautXL_v9Rundiffusion.safetensors (or RealVisXL_V4.0.safetensors)",
+    "ControlNet: diffusers_xl_depth_full.safetensors",
+    "SVD model: svd_xt_1_1.safetensors",
+    "Custom nodes: comfyui_controlnet_aux, VideoHelperSuite"
+  ],
+
+  "prompt": {
+    "_comment_pass1": "=== PASS 1: SDXL Base Generation (1024x1024) ===",
+
+    "1": {
+      "class_type": "CheckpointLoaderSimple",
+      "inputs": {
+        "ckpt_name": "juggernautXL_v9Rundiffusion.safetensors"
+      }
+    },
+    "2": {
+      "class_type": "CLIPTextEncode",
+      "inputs": {
+        "text": "first person POV, standing at the edge of a skyscraper rooftop, feet visible near the concrete ledge in dark shoes, looking down at the street far below, extreme height 40 floors above ground, strong depth perspective with vertigo, realistic scale with tiny cars and miniature pedestrians on the street far below, city skyline with buildings at varying distances, weathered concrete rooftop surface with cracks and dirt, thin corroded metal safety railing, ultra realistic, cinematic golden hour lighting, wide angle lens, highly detailed architectural photography, 8k uhd, shot on Canon EOS R5, photorealistic, hyperdetailed textures",
+        "clip": ["1", 1]
+      }
+    },
+    "3": {
+      "class_type": "CLIPTextEncode",
+      "inputs": {
+        "text": "blurry, low quality, cartoon, distorted, deformed, unrealistic, extra limbs, bad anatomy, duplicate objects, anime, painting, watermark, text, logo, worst quality, green screen, monochrome, oversaturated, cropped, out of frame, fisheye distortion, floating objects, broken geometry, abstract, surreal, fantasy, jpeg artifacts, noise, grain",
+        "clip": ["1", 1]
+      }
+    },
+    "4": {
+      "class_type": "EmptyLatentImage",
+      "inputs": {
+        "width": 1024,
+        "height": 1024,
+        "batch_size": 1
+      }
+    },
+    "5": {
+      "class_type": "KSampler",
+      "inputs": {
+        "model": ["1", 0],
+        "positive": ["2", 0],
+        "negative": ["3", 0],
+        "latent_image": ["4", 0],
+        "seed": 424242,
+        "steps": 35,
+        "cfg": 6.0,
+        "sampler_name": "dpmpp_2m",
+        "scheduler": "karras",
+        "denoise": 1.0
+      }
+    },
+    "6": {
+      "class_type": "VAEDecode",
+      "inputs": {
+        "samples": ["5", 0],
+        "vae": ["1", 2]
+      }
+    },
+    "7": {
+      "class_type": "SaveImage",
+      "inputs": {
+        "images": ["6", 0],
+        "filename_prefix": "acrophobia_base"
+      }
+    },
+
+    "_comment_pass2": "=== PASS 2: Depth Extraction + ControlNet Refinement ===",
+
+    "10": {
+      "class_type": "DepthAnythingPreprocessor",
+      "inputs": {
+        "image": ["6", 0],
+        "ckpt_name": "depth_anything_vitl14.pth",
+        "resolution": 1024
+      }
+    },
+    "11": {
+      "class_type": "SaveImage",
+      "inputs": {
+        "images": ["10", 0],
+        "filename_prefix": "acrophobia_depth"
+      }
+    },
+    "12": {
+      "class_type": "ControlNetLoader",
+      "inputs": {
+        "control_net_name": "diffusers_xl_depth_full.safetensors"
+      }
+    },
+    "13": {
+      "class_type": "ControlNetApplyAdvanced",
+      "inputs": {
+        "positive": ["2", 0],
+        "negative": ["3", 0],
+        "control_net": ["12", 0],
+        "image": ["10", 0],
+        "strength": 0.65,
+        "start_percent": 0.0,
+        "end_percent": 0.85
+      }
+    },
+    "14": {
+      "class_type": "KSampler",
+      "inputs": {
+        "model": ["1", 0],
+        "positive": ["13", 0],
+        "negative": ["13", 1],
+        "latent_image": ["5", 0],
+        "seed": 424243,
+        "steps": 25,
+        "cfg": 5.5,
+        "sampler_name": "dpmpp_2m",
+        "scheduler": "karras",
+        "denoise": 0.45
+      }
+    },
+    "15": {
+      "class_type": "VAEDecode",
+      "inputs": {
+        "samples": ["14", 0],
+        "vae": ["1", 2]
+      }
+    },
+    "16": {
+      "class_type": "SaveImage",
+      "inputs": {
+        "images": ["15", 0],
+        "filename_prefix": "acrophobia_refined"
+      }
+    },
+
+    "_comment_pass3": "=== PASS 3: Stable Video Diffusion ===",
+
+    "20": {
+      "class_type": "ImageOnlyCheckpointLoader",
+      "inputs": {
+        "ckpt_name": "svd_xt_1_1.safetensors"
+      }
+    },
+    "21": {
+      "class_type": "SVD_img2vid_Conditioning",
+      "inputs": {
+        "clip_vision": ["20", 1],
+        "init_image": ["15", 0],
+        "vae": ["20", 2],
+        "width": 1024,
+        "height": 576,
+        "video_frames": 25,
+        "motion_bucket_id": 40,
+        "fps": 6,
+        "augmentation_level": 0.02
+      }
+    },
+    "22": {
+      "class_type": "KSampler",
+      "inputs": {
+        "model": ["20", 0],
+        "positive": ["21", 0],
+        "negative": ["21", 1],
+        "latent_image": ["21", 2],
+        "seed": 424244,
+        "steps": 20,
+        "cfg": 2.5,
+        "sampler_name": "euler",
+        "scheduler": "karras",
+        "denoise": 1.0
+      }
+    },
+    "23": {
+      "class_type": "VAEDecode",
+      "inputs": {
+        "samples": ["22", 0],
+        "vae": ["20", 2]
+      }
+    },
+    "24": {
+      "class_type": "VHS_VideoCombine",
+      "inputs": {
+        "images": ["23", 0],
+        "frame_rate": 6,
+        "loop_count": 0,
+        "filename_prefix": "acrophobia_svd",
+        "format": "video/h264-mp4",
+        "pingpong": true,
+        "save_output": true
+      }
+    }
+  }
+}

@@ -1,0 +1,195 @@
+{
+  "name": "VR Therapy Pipeline",
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "vr-therapy",
+        "responseMode": "responseNode",
+        "options": {}
+      },
+      "id": "webhook-trigger",
+      "name": "Webhook Trigger",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [220, 300]
+    },
+    {
+      "parameters": {
+        "jsCode": "// Gelen isteği doğrula\nconst body = $input.first().json.body;\n\nconst scenarioId = body.scenarioId;\nconst scenarioTitle = body.scenarioTitle;\nconst userEmail = body.userEmail || null;\n\nif (!scenarioId || !scenarioTitle) {\n  throw new Error('scenarioId ve scenarioTitle gerekli');\n}\n\nreturn [{ json: { scenarioId, scenarioTitle, userEmail } }];"
+      },
+      "id": "validate-input",
+      "name": "Validate Input",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [440, 300]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "http://media-service:3001/api/jobs",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify($json) }}",
+        "options": {
+          "timeout": 10000
+        }
+      },
+      "id": "start-job",
+      "name": "Start Media Job",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [660, 300]
+    },
+    {
+      "parameters": {
+        "jsCode": "// Job polling için başlangıç durumu\nconst jobId = $input.first().json.jobId;\nreturn [{ json: { jobId, attempts: 0, maxAttempts: 120 } }];"
+      },
+      "id": "init-polling",
+      "name": "Init Polling",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [880, 300]
+    },
+    {
+      "parameters": {
+        "amount": 5,
+        "unit": "seconds"
+      },
+      "id": "wait-5s",
+      "name": "Wait 5s",
+      "type": "n8n-nodes-base.wait",
+      "typeVersion": 1.1,
+      "position": [1100, 300]
+    },
+    {
+      "parameters": {
+        "method": "GET",
+        "url": "=http://media-service:3001/api/jobs/{{ $json.jobId }}",
+        "options": {
+          "timeout": 10000
+        }
+      },
+      "id": "check-job-status",
+      "name": "Check Job Status",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [1320, 300]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict"
+          },
+          "conditions": [
+            {
+              "leftValue": "={{ $json.status }}",
+              "rightValue": "completed",
+              "operator": {
+                "type": "string",
+                "operation": "equals"
+              }
+            }
+          ],
+          "combinator": "and"
+        }
+      },
+      "id": "is-completed",
+      "name": "Is Completed?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [1540, 300]
+    },
+    {
+      "parameters": {
+        "jsCode": "// Tamamlandı — sonucu döndür\nconst job = $input.first().json;\nreturn [{\n  json: {\n    success: true,\n    jobId: job.id,\n    videoUrl: job.videoUrl,\n    scenarioTitle: job.scenarioTitle,\n    message: 'VR terapi videonuz hazır!'\n  }\n}];"
+      },
+      "id": "format-success",
+      "name": "Format Success",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [1760, 200]
+    },
+    {
+      "parameters": {
+        "jsCode": "// Hata kontrolü ve retry\nconst job = $input.first().json;\nconst attempts = job.attempts || 0;\nconst maxAttempts = job.maxAttempts || 120;\n\nif (job.status === 'failed') {\n  throw new Error(`Job başarısız: ${job.error || 'Bilinmeyen hata'}`);\n}\n\nif (attempts >= maxAttempts) {\n  throw new Error('Job zaman aşımına uğradı (10 dakika)');\n}\n\nreturn [{ json: { jobId: job.id, attempts: attempts + 1, maxAttempts } }];"
+      },
+      "id": "check-retry",
+      "name": "Check & Retry",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [1760, 400]
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ JSON.stringify($json) }}",
+        "options": {
+          "responseCode": 200
+        }
+      },
+      "id": "respond-success",
+      "name": "Respond Success",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.1,
+      "position": [1980, 200]
+    }
+  ],
+  "connections": {
+    "Webhook Trigger": {
+      "main": [
+        [{ "node": "Validate Input", "type": "main", "index": 0 }]
+      ]
+    },
+    "Validate Input": {
+      "main": [
+        [{ "node": "Start Media Job", "type": "main", "index": 0 }]
+      ]
+    },
+    "Start Media Job": {
+      "main": [
+        [{ "node": "Init Polling", "type": "main", "index": 0 }]
+      ]
+    },
+    "Init Polling": {
+      "main": [
+        [{ "node": "Wait 5s", "type": "main", "index": 0 }]
+      ]
+    },
+    "Wait 5s": {
+      "main": [
+        [{ "node": "Check Job Status", "type": "main", "index": 0 }]
+      ]
+    },
+    "Check Job Status": {
+      "main": [
+        [{ "node": "Is Completed?", "type": "main", "index": 0 }]
+      ]
+    },
+    "Is Completed?": {
+      "main": [
+        [{ "node": "Format Success", "type": "main", "index": 0 }],
+        [{ "node": "Check & Retry", "type": "main", "index": 0 }]
+      ]
+    },
+    "Format Success": {
+      "main": [
+        [{ "node": "Respond Success", "type": "main", "index": 0 }]
+      ]
+    },
+    "Check & Retry": {
+      "main": [
+        [{ "node": "Wait 5s", "type": "main", "index": 0 }]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "meta": {
+    "templateCredsSetupCompleted": true
+  }
+}

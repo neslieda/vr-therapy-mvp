@@ -1,0 +1,6 @@
+# /data dizini yapısı
+# Docker volume olarak mount edilir, üretilen dosyalar burada tutulur
+
+panoramas/    # ComfyUI tarafından üretilen 360° panorama görselleri
+videos/       # Final birleştirilmiş VR videoları
+temp/         # Geçici sahne videoları (işlem sonrası silinir)
